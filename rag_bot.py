@@ -30,8 +30,8 @@ Mémoire pertinente pour ce tour :
 """
 
 
-def fallback_reply(message: str, knowledge: dict[str, Any]) -> str:
-    """Réponse locale de démonstration quand aucune clé LLM n'est configurée."""
+def fallback_reply(message: str) -> str:
+    """Réponse locale de démonstration quand le modèle n'est pas disponible."""
     context = context_for(message)
     if context == "Aucun passage spécifique trouvé.":
         return "Je peux vous aider à clarifier votre objectif, votre cible et votre prochaine étape. Pouvez-vous m'en dire un peu plus sur votre besoin ?"
@@ -43,24 +43,31 @@ def fallback_reply(message: str, knowledge: dict[str, Any]) -> str:
 
 
 def answer(message: str, history: list[dict[str, str]] | None = None) -> str:
-    """Répond à un message en utilisant la mémoire locale puis le modèle configuré."""
-    knowledge = load_knowledge()
+    """Répond à un message avec la mémoire locale et, si possible, le modèle configuré."""
+    knowledge: dict[str, Any] = load_knowledge()
     context = context_for(message)
     if not os.getenv("OPENAI_API_KEY") or OpenAI is None:
-        return fallback_reply(message, knowledge)
+        return fallback_reply(message)
 
-    client = OpenAI()
-    messages: list[dict[str, str]] = [
-        {"role": "system", "content": SYSTEM_PROMPT.format(context=context)},
-    ]
-    messages.extend(history or [])
-    messages.append({"role": "user", "content": message})
-    response = client.chat.completions.create(
-        model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-        messages=messages,
-        temperature=0.4,
-    )
-    return response.choices[0].message.content or "Je n'ai pas pu générer une réponse."
+    try:
+        client = OpenAI()
+        messages: list[dict[str, str]] = [
+            {"role": "system", "content": SYSTEM_PROMPT.format(context=context)},
+        ]
+        messages.extend(history or [])
+        messages.append({"role": "user", "content": message})
+        response = client.chat.completions.create(
+            model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+            messages=messages,
+            temperature=0.4,
+        )
+        choices = getattr(response, "choices", None) or []
+        if choices and getattr(choices[0].message, "content", None):
+            return choices[0].message.content
+    except Exception:
+        # Le bot reste utilisable localement si le fournisseur est indisponible.
+        pass
+    return fallback_reply(message)
 
 
 def main() -> None:
