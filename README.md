@@ -11,6 +11,23 @@ pip install -r requirements.txt
 python rag_bot.py
 ```
 
+## Déploiement Railway + Telegram
+
+Le `Procfile` démarre automatiquement le worker Telegram :
+
+```text
+worker: python telegram_bot.py
+```
+
+Dans Railway, ajoute ces variables dans **Variables** — jamais dans le code :
+
+```text
+TELEGRAM_TOKEN=token_fourni_par_BotFather
+AYA_ADMIN_ID=identifiant_telegram_numerique_de_l_admin
+```
+
+Le code accepte aussi les alias `telegram_token` et `admin_id`. Le bot utilise le polling Telegram, adapté au service **Worker** Railway. Il répond aux messages texte, analyse les PDF envoyés et tente de lire les QR codes envoyés en image.
+
 Dépendances open source :
 
 - `pypdf` pour extraire le texte des PDF ;
@@ -47,6 +64,8 @@ admin_update(admin_id, "business_info", {"installation": "48-72h"})
 ```
 
 Les modifications sont écrites dans `knowledge.json`. Toute autre valeur d'ID est refusée. Pour une conversation, `answer(message, history, admin_id=...)` accepte également `/admin instruction <nouvelle instruction>`.
+
+Sur Telegram, l'ID admin est vérifié avec l'identifiant numérique de l'expéditeur. Sans correspondance avec `AYA_ADMIN_ID`/`admin_id`, les commandes d'administration sont refusées.
 
 ## Règles commerciales
 
