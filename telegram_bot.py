@@ -20,6 +20,9 @@ from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandl
 
 logging.basicConfig(format="%(asctime)s %(levelname)s %(name)s: %(message)s", level=logging.INFO)
 LOGGER = logging.getLogger("aya.telegram")
+# Les URLs Telegram contiennent le token du bot : ne jamais les écrire dans Railway.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 HISTORY: dict[int, list[dict[str, str]]] = {}
 
 
