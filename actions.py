@@ -148,6 +148,129 @@ def handoff_to_human(reason: str) -> dict[str, str]:
     return {"status": "handoff_requested", "reason": reason.strip()}
 
 
+# ---------------------------------------------------------------------------
+# Parcours conversationnel commercial d'Aya
+# ---------------------------------------------------------------------------
+
+CONVERSATION_STAGES = (
+    "accroche", "qualification", "douleur_solution", "catalogue",
+    "objections", "closing", "handoff_suivi",
+)
+
+
+def new_conversation_state() -> dict[str, Any]:
+    """Crée un état isolé par prospect, sérialisable si un stockage est ajouté."""
+    return {
+        "stage": "accroche",
+        "name": "",
+        "need": "",
+        "budget": "",
+        "timeline": "",
+        "pain": "",
+        "offer_id": "",
+        "last_question": "",
+        "objection": "",
+    }
+
+
+def _short_positive(message: str) -> bool:
+    return message.lower().strip() in {"oui", "ok", "d'accord", "yes", "vas-y", "montre", "je veux voir"}
+
+
+def _short_negative(message: str) -> bool:
+    text = message.lower().strip()
+    return text in {"non", "bof", "no", "pas intéressé", "laisse", "non laisse"} or "pas intéressé" in text
+
+
+def _objection_reply(message: str) -> str:
+    text = message.lower()
+    if any(word in text for word in ("cher", "prix", "budget", "coûte")):
+        return "Je comprends. On peut commencer par une seule plateforme et garder un budget maîtrisé. Tu veux partir sur Telegram, WhatsApp ou Instagram?"
+    if any(word in text for word in ("réfléchir", "plus tard", "temps")):
+        return "Bien sûr, aucun souci. Je peux te laisser une recommandation claire à relire : quel est le principal point qui te fait hésiter?"
+    if any(word in text for word in ("confiance", "sécurité", "garantie")):
+        return "C'est normal de vérifier. On définit d'abord le périmètre et le résultat attendu avant de lancer quoi que ce soit. Qu'aimerais-tu valider en priorité?"
+    return "Je comprends ton hésitation. Qu'est-ce qui te bloque le plus : le budget, le fonctionnement ou le délai?"
+
+
+def conversation_step(message: str, state: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Fait avancer un prospect dans les 7 étapes métier.
+
+    Retourne ``stage``, ``reply``, ``buttons`` et ``state``. Cette fonction est
+    indépendante de Telegram et peut être utilisée par WhatsApp, une API ou des tests.
+    """
+    state = {**new_conversation_state(), **(state or {})}
+    text = message.strip()
+    lower = text.lower()
+    if not text:
+        return {"stage": state["stage"], "reply": "Que souhaites-tu automatiser aujourd'hui?", "buttons": [], "state": state}
+    if any(topic in lower for topic in ("juridique", "médical", "médecin", "litige", "compta", "comptabilité", "site complet")):
+        state["stage"] = "handoff_suivi"
+        return {"stage": state["stage"], "reply": "Pour ce sujet, je préfère te passer mon responsable humain pour bien t'accompagner. Il te répond en moins de 2h.", "buttons": [], "state": state, "handoff": True}
+    if _short_negative(text):
+        state["stage"] = "handoff_suivi"
+        return {"stage": state["stage"], "reply": "Compris, je ne t'embête pas. Je te laisse juste un exemple ici au cas où, ça pourra t'aider plus tard.", "buttons": ["catalogue"], "state": state}
+
+    stage = state.get("stage", "accroche")
+    if stage == "accroche":
+        state["stage"] = "qualification"
+        state["last_question"] = "name"
+        return {"stage": state["stage"], "reply": "Bonjour, je suis Aya de Komara Agency. Tu fais quoi comme activité aujourd'hui?", "buttons": [], "state": state}
+
+    if stage == "qualification":
+        field = state.get("last_question", "name")
+        state[field] = text
+        lead = qualify_lead(state["name"], state["need"], state["budget"], state["timeline"])
+        next_field = lead["missing_fields"][0] if lead["missing_fields"] else None
+        questions = {
+            "need": "C'est quoi ton objectif principal : avoir plus de clients ou gagner du temps?",
+            "budget": "Quel budget approximatif tu avais prévu pour automatiser ça?",
+            "timeline": "Tu voudrais que ce soit en place pour quand?",
+        }
+        if next_field:
+            state["last_question"] = next_field
+            return {"stage": state["stage"], "reply": questions[next_field], "buttons": [], "state": state, "lead": lead}
+        state["stage"] = "douleur_solution"
+        state["last_question"] = "pain"
+        return {"stage": state["stage"], "reply": "Qu'est-ce qui te prend le plus de temps aujourd'hui dans ta gestion clients?", "buttons": [], "state": state, "lead": lead}
+
+    if stage == "douleur_solution":
+        state["pain"] = text
+        state["need"] = state["need"] or text
+        offer = recommend_offer(state["need"])
+        state["offer_id"] = offer["id"]
+        state["stage"] = "catalogue"
+        return {"stage": state["stage"], "reply": f"Je vois. Pour réduire ce point de friction, le plus adapté serait {offer['name']}. Je te montre les options?", "buttons": ["catalogue", "voir recommandation"], "state": state, "offer": offer}
+
+    if stage == "catalogue":
+        if _short_positive(text) or "catalog" in lower or "offre" in lower:
+            state["stage"] = "objections"
+            return {"stage": state["stage"], "reply": "Voici les offres. Laquelle t'intéresse ou quelle réserve veux-tu qu'on regarde ensemble?", "buttons": ["Telegram Bot", "WhatsApp Bot", "Instagram Bot", "J'ai une objection"], "state": state}
+        state["stage"] = "objections"
+        state["objection"] = text
+        return {"stage": state["stage"], "reply": _objection_reply(text), "buttons": ["WhatsApp Bot", "Telegram Bot", "Parler à un humain"], "state": state}
+
+    if stage == "objections":
+        if "humain" in lower or "responsable" in lower:
+            state["stage"] = "handoff_suivi"
+            return {"stage": state["stage"], "reply": "Je te passe mon responsable humain pour finaliser proprement. Tu préfères être recontacté ici?", "buttons": [], "state": state, "handoff": True}
+        if _short_negative(text) or "objection" in lower:
+            return {"stage": stage, "reply": _objection_reply(text), "buttons": ["Voir les options", "Parler à un humain"], "state": state}
+        state["stage"] = "closing"
+        return {"stage": state["stage"], "reply": "Parfait. Tu veux que je prépare le démarrage avec cette option?", "buttons": ["Oui, démarrer", "J'ai une question", "Parler à un humain"], "state": state}
+
+    if stage == "closing":
+        if _short_negative(text) or "question" in lower:
+            state["stage"] = "objections"
+            return {"stage": state["stage"], "reply": _objection_reply(text), "buttons": ["Oui, démarrer", "Parler à un humain"], "state": state}
+        if _short_positive(text) or "démarrer" in lower or "commencer" in lower:
+            state["stage"] = "handoff_suivi"
+            return {"stage": state["stage"], "reply": "Super. Je prépare le suivi avec ton activité, ton besoin et ton délai. Tu confirmes qu'on avance ici?", "buttons": ["Confirmer", "Parler à un humain"], "state": state, "follow_up": True}
+        return {"stage": stage, "reply": "Tu veux que je prépare le démarrage ou tu as une dernière question?", "buttons": ["Oui, démarrer", "J'ai une question"], "state": state}
+
+    return {"stage": "handoff_suivi", "reply": "Je peux organiser le suivi avec l'équipe. Tu préfères continuer ici ou parler à un humain?", "buttons": ["Continuer ici", "Parler à un humain"], "state": state}
+
+
 def admin_update(admin_id: str, update_type: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Applique une modification à knowledge.json uniquement si l'ID admin correspond.
 

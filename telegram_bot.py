@@ -11,12 +11,18 @@ import os
 import tempfile
 from pathlib import Path
 
-from actions import admin_update, decode_qr, extract_pdf
+from actions import (
+    admin_update,
+    conversation_step,
+    decode_qr,
+    extract_pdf,
+    new_conversation_state,
+)
 from knowledge_store import context_for, load_knowledge
 from rag_bot import answer
 
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 
 logging.basicConfig(format="%(asctime)s %(levelname)s %(name)s: %(message)s", level=logging.INFO)
@@ -26,6 +32,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 HISTORY: dict[int, list[dict[str, str]]] = {}
 PENDING_ADMIN_REPLIES: dict[int, dict[str, str | int]] = {}
+CONVERSATION_STATES: dict[int, dict[str, object]] = {}
 
 
 def env_first(*names: str) -> str:
@@ -78,6 +85,35 @@ def is_catalogue_request(message: str) -> bool:
     return normalized in {
         "catalogue", "catalog", "prix", "tarifs", "offres", "montre", "je veux voir"
     }
+
+
+def action_buttons(buttons: list[str]) -> InlineKeyboardMarkup | None:
+    """Transforme les choix commerciaux en boutons Telegram."""
+    if not buttons:
+        return None
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(label, callback_data=f"aya:{label}")]
+        for label in buttons
+    ])
+
+
+async def conversation_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Traite les boutons catalogue, objections et closing."""
+    query = update.callback_query
+    if not query or not query.message:
+        return
+    await query.answer()
+    chat_id = query.message.chat_id
+    label = (query.data or "").removeprefix("aya:")
+    if label == "catalogue":
+        state = CONVERSATION_STATES.setdefault(chat_id, new_conversation_state())
+        state["stage"] = "objections"
+        await query.message.reply_text(catalog_text(), reply_markup=action_buttons(["WhatsApp Bot", "Telegram Bot", "Instagram Bot", "J'ai une objection"]))
+        return
+    state = CONVERSATION_STATES.setdefault(chat_id, new_conversation_state())
+    result = conversation_step(label, state)
+    CONVERSATION_STATES[chat_id] = result["state"]
+    await query.message.reply_text(result["reply"], reply_markup=action_buttons(result.get("buttons", [])))
 
 
 async def catalog_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -152,34 +188,23 @@ async def text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if is_catalogue_request(incoming):
         await update.message.reply_text(catalog_text())
         return
-    response = answer(incoming, history, admin_id=admin_id)
-    # Cette phrase est le repli local d'Aya lorsqu'elle ne possède pas la réponse.
-    unknown = (
-        response.startswith("Je peux te préparer une recommandation adaptée.")
-        or context_for(incoming) == "Aucun passage spécifique trouvé."
-    )
-    if unknown and env_first("AYA_ADMIN_ID", "admin_id"):
+    state = CONVERSATION_STATES.setdefault(chat_id, new_conversation_state())
+    result = conversation_step(incoming, state)
+    CONVERSATION_STATES[chat_id] = result["state"]
+    response = result["reply"]
+    await update.message.reply_text(response, reply_markup=action_buttons(result.get("buttons", [])))
+    # Les sujets explicitement hors périmètre sont transmis à l'admin.
+    if result.get("handoff") and env_first("AYA_ADMIN_ID", "admin_id"):
         admin_chat_id = int(env_first("AYA_ADMIN_ID", "admin_id"))
-        forwarded = await context.bot.forward_message(
-            chat_id=admin_chat_id, from_chat_id=chat_id, message_id=update.message.message_id
-        )
-        PENDING_ADMIN_REPLIES[forwarded.message_id] = {
-            "client_chat_id": chat_id,
-            "question": incoming,
-        }
-        await context.bot.send_message(
-            chat_id=admin_chat_id,
-            text="Question inconnue transférée. Réponds directement au message transféré pour répondre au client et apprendre la réponse à Aya.",
-            reply_to_message_id=forwarded.message_id,
-        )
-        await update.message.reply_text("Je vérifie cette information avec l'équipe et je te reviens rapidement.")
-    else:
-        await update.message.reply_text(response)
+        forwarded = await context.bot.forward_message(chat_id=admin_chat_id, from_chat_id=chat_id, message_id=update.message.message_id)
+        PENDING_ADMIN_REPLIES[forwarded.message_id] = {"client_chat_id": chat_id, "question": incoming}
+        await context.bot.send_message(chat_id=admin_chat_id, text="Nouveau handoff commercial : réponds au message transféré pour reprendre la conversation.", reply_to_message_id=forwarded.message_id)
     history.extend([
-        {"role": "user", "content": update.message.text or ""},
+        {"role": "user", "content": incoming},
         {"role": "assistant", "content": response},
     ])
     HISTORY[chat_id] = history[-12:]
+    return
 
 
 async def document_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -233,6 +258,7 @@ def build_application(token: str) -> Application:
     application.add_handler(CommandHandler("catalog", catalog_command))
     application.add_handler(CommandHandler("admin", admin_command))
     application.add_handler(CommandHandler("apprend", admin_command))
+    application.add_handler(CallbackQueryHandler(conversation_button, pattern=r"^aya:"))
     application.add_handler(MessageHandler(filters.Document.ALL, document_message))
     application.add_handler(MessageHandler(filters.PHOTO, photo_message))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_message))

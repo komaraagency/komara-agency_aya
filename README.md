@@ -46,6 +46,20 @@ Dans le terminal :
 
 Les demandes courtes `catalogue`, `catalog`, `prix`, `tarifs`, `offres`, `montre` et `je veux voir` déclenchent également le Catalogue V2. Il présente les abonnements mensuels Telegram (75 €/mois), WhatsApp (150 €/mois, populaire) et Instagram (100 €/mois), avec leurs fonctionnalités.
 
+## Parcours conversationnel d'Aya
+
+Le moteur `conversation_step()` dans [`actions.py`](actions.py) suit l'état de chaque prospect :
+
+1. **Accroche** — présentation et première question métier ;
+2. **Qualification** — activité, besoin, budget, délai ;
+3. **Douleur → solution** — identification du blocage puis recommandation ;
+4. **Catalogue + boutons** — offres V2 affichées avec choix Telegram ;
+5. **Lever d'objections** — budget, délai, confiance ou fonctionnement ;
+6. **Closing** — proposition de démarrage sans forcer ;
+7. **Handoff / suivi** — transfert humain ou préparation du suivi.
+
+Telegram utilise des boutons inline pour faire avancer le prospect dans ces étapes.
+
 Le Pack Omni reste toujours `sur devis uniquement`. Aya ne fabrique pas de prix.
 
 ## Administration par ID
