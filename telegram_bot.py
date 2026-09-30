@@ -11,7 +11,8 @@ import os
 import tempfile
 from pathlib import Path
 
-from actions import decode_qr, extract_pdf
+from actions import admin_update, decode_qr, extract_pdf
+from knowledge_store import context_for, load_knowledge
 from rag_bot import answer
 
 from telegram import Update
@@ -24,6 +25,7 @@ LOGGER = logging.getLogger("aya.telegram")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 HISTORY: dict[int, list[dict[str, str]]] = {}
+PENDING_ADMIN_REPLIES: dict[int, dict[str, str | int]] = {}
 
 
 def env_first(*names: str) -> str:
@@ -50,14 +52,116 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
 
 
+def catalog_text() -> str:
+    """Construit le catalogue à partir de knowledge.json, sans prix inventé."""
+    knowledge = load_knowledge()
+    lines = ["Catalogue Komara Agency — Aya", ""]
+    for offer in knowledge["offers"]:
+        price = offer["price_label"]
+        channels = ", ".join(offer["channels"])
+        lines.append(f"• {offer['name']} ({channels}) : {price}")
+        lines.append(f"  {offer['benefit']}")
+    lines.extend([
+        "",
+        f"Installation : {knowledge['business']['installation']}",
+        "Paiement : " + ", ".join(knowledge["business"]["payment_methods"]),
+        "Écris-moi ton activité et ton objectif pour recevoir une recommandation adaptée.",
+    ])
+    return "\n".join(lines)
+
+
+async def catalog_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.message:
+        await update.message.reply_text(catalog_text())
+
+
+async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Commandes admin : instruction, faq, price et apprentissage question||réponse."""
+    if not update.message:
+        return
+    admin_id = admin_id_for(update)
+    if not admin_id:
+        await update.message.reply_text("Action admin refusée : identifiant non autorisé.")
+        return
+    text = update.message.text or ""
+    command, _, raw = text.partition(" ")
+    try:
+        if command == "/admin" and raw.startswith("instruction "):
+            result = admin_update(admin_id, "instruction", {"text": raw[len("instruction "):].strip()})
+        elif command in {"/apprend", "/admin"} and "||" in raw:
+            question, answer_text = (part.strip() for part in raw.split("||", 1))
+            result = admin_update(admin_id, "faq", {"question": question, "answer": answer_text})
+        elif command == "/admin" and raw.startswith("faq ") and "||" in raw[4:]:
+            question, answer_text = (part.strip() for part in raw[4:].split("||", 1))
+            result = admin_update(admin_id, "faq", {"question": question, "answer": answer_text})
+        elif command == "/admin" and raw.startswith("price "):
+            offer_id, price = raw[len("price "):].split(maxsplit=1)
+            result = admin_update(admin_id, "offer_price", {"offer_id": offer_id, "price_eur": float(price)})
+        else:
+            await update.message.reply_text(
+                "Commandes :\n/admin instruction <texte>\n/apprend <question> || <réponse>\n"
+                "/admin price <offer_id> <prix>\n/catalog"
+            )
+            return
+        await update.message.reply_text(f"Mise à jour appliquée : {result['update_type']}.")
+    except (PermissionError, ValueError, KeyError) as exc:
+        await update.message.reply_text(f"Mise à jour refusée : {exc}")
+
+
+async def deliver_admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Si l'admin répond à une question transférée, renvoie sa réponse au client et l'apprend."""
+    if not update.message or not update.message.reply_to_message or not admin_id_for(update):
+        return False
+    pending = PENDING_ADMIN_REPLIES.get(update.message.reply_to_message.message_id)
+    if not pending:
+        return False
+    client_chat_id = int(pending["client_chat_id"])
+    response = update.message.text or ""
+    await context.bot.send_message(chat_id=client_chat_id, text=response)
+    question = str(pending["question"])
+    admin_id = admin_id_for(update)
+    if admin_id:
+        try:
+            admin_update(admin_id, "faq", {"question": question, "answer": response})
+        except (PermissionError, ValueError, KeyError):
+            LOGGER.exception("Could not persist admin answer")
+    await update.message.reply_text("Réponse envoyée au client et ajoutée à la mémoire d'Aya.")
+    del PENDING_ADMIN_REPLIES[update.message.reply_to_message.message_id]
+    return True
+
+
 async def text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.effective_chat:
         return
     chat_id = update.effective_chat.id
     history = HISTORY.setdefault(chat_id, [])[-12:]
     admin_id = admin_id_for(update)
-    response = answer(update.message.text or "", history, admin_id=admin_id)
-    await update.message.reply_text(response)
+    if await deliver_admin_reply(update, context):
+        return
+    incoming = update.message.text or ""
+    response = answer(incoming, history, admin_id=admin_id)
+    # Cette phrase est le repli local d'Aya lorsqu'elle ne possède pas la réponse.
+    unknown = (
+        response.startswith("Je peux te préparer une recommandation adaptée.")
+        or context_for(incoming) == "Aucun passage spécifique trouvé."
+    )
+    if unknown and env_first("AYA_ADMIN_ID", "admin_id"):
+        admin_chat_id = int(env_first("AYA_ADMIN_ID", "admin_id"))
+        forwarded = await context.bot.forward_message(
+            chat_id=admin_chat_id, from_chat_id=chat_id, message_id=update.message.message_id
+        )
+        PENDING_ADMIN_REPLIES[forwarded.message_id] = {
+            "client_chat_id": chat_id,
+            "question": incoming,
+        }
+        await context.bot.send_message(
+            chat_id=admin_chat_id,
+            text="Question inconnue transférée. Réponds directement au message transféré pour répondre au client et apprendre la réponse à Aya.",
+            reply_to_message_id=forwarded.message_id,
+        )
+        await update.message.reply_text("Je vérifie cette information avec l'équipe et je te reviens rapidement.")
+    else:
+        await update.message.reply_text(response)
     history.extend([
         {"role": "user", "content": update.message.text or ""},
         {"role": "assistant", "content": response},
@@ -113,6 +217,9 @@ async def photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 def build_application(token: str) -> Application:
     application = Application.builder().token(token).build()
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("catalog", catalog_command))
+    application.add_handler(CommandHandler("admin", admin_command))
+    application.add_handler(CommandHandler("apprend", admin_command))
     application.add_handler(MessageHandler(filters.Document.ALL, document_message))
     application.add_handler(MessageHandler(filters.PHOTO, photo_message))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_message))

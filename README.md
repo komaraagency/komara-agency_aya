@@ -42,6 +42,7 @@ Dans le terminal :
 - `/qr chemin/vers/image.png` — décode le QR code localement ;
 - `/devis whatsapp` — calcule un devis à partir du prix enregistré ;
 - `/rdv 2026-10-01T14:00:00+01:00 Appel découverte` — crée un brouillon `.ics` importable dans un agenda.
+- `/catalog` — envoie le catalogue commercial au prospect.
 
 Le Pack Omni reste toujours `sur devis uniquement`. Aya ne fabrique pas de prix.
 
@@ -66,6 +67,26 @@ admin_update(admin_id, "business_info", {"installation": "48-72h"})
 Les modifications sont écrites dans `knowledge.json`. Toute autre valeur d'ID est refusée. Pour une conversation, `answer(message, history, admin_id=...)` accepte également `/admin instruction <nouvelle instruction>`.
 
 Sur Telegram, l'ID admin est vérifié avec l'identifiant numérique de l'expéditeur. Sans correspondance avec `AYA_ADMIN_ID`/`admin_id`, les commandes d'administration sont refusées.
+
+### Répondre depuis l'ID admin
+
+Quand Aya ne trouve pas de réponse fiable, elle transfère le message original à l'ID admin et demande à l'admin de **répondre directement au message transféré**. La réponse est alors :
+
+1. envoyée au client ;
+2. ajoutée automatiquement à la FAQ de `knowledge.json` ;
+3. disponible pour les prochaines recherches d'Aya.
+
+Commandes admin :
+
+```text
+/catalog
+/admin instruction Toujours demander le secteur avant le budget.
+/apprend Question du client || Réponse validée par Komara
+/admin faq Question du client || Réponse validée par Komara
+/admin price whatsapp 175
+```
+
+Le catalogue est généré depuis les offres de `knowledge.json`, donc les prix affichés restent cohérents avec les devis. Les transferts en attente sont conservés en mémoire du worker ; après un redémarrage Railway, il faudra renvoyer la question si elle n'a pas encore reçu de réponse.
 
 ## Règles commerciales
 
