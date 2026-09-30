@@ -12,45 +12,87 @@
     "company": "Komara Agency",
     "description": "Komara Agency crée et vend Aya : des employés IA qui répondent sur WhatsApp, Telegram, Instagram et Messenger 24h/24, et peuvent vendre et encaisser à la place de l'équipe.",
     "origin": "Guinée / International",
-    "installation": "24-48h",
-    "payment_methods": ["Orange Money", "PayPal", "virement"]
+    "installation": "déploiement en 24h",
+    "payment_methods": [
+      "Orange Money",
+      "PayPal",
+      "virement"
+    ]
   },
   "offers": [
     {
       "id": "telegram",
       "name": "Bot Telegram",
       "starting_price_eur": 75,
-      "price_label": "à partir de 75€",
-      "channels": ["Telegram"],
-      "benefit": "répondre automatiquement, qualifier et vendre sur Telegram"
+      "price_label": "75€ /mois",
+      "channels": [
+        "Telegram"
+      ],
+      "benefit": "répondre automatiquement, qualifier et vendre sur Telegram",
+      "billing": "monthly",
+      "features": [
+        "Réponses automatiques instantanées",
+        "FAQ & support client 24/7",
+        "Intégration simple Telegram API",
+        "Analytics & messages illimités"
+      ]
     },
     {
       "id": "whatsapp",
       "name": "Bot WhatsApp",
       "starting_price_eur": 150,
-      "price_label": "à partir de 150€",
-      "channels": ["WhatsApp"],
-      "benefit": "répondre instantanément, qualifier les demandes et vendre sur WhatsApp"
+      "price_label": "150€ /mois",
+      "channels": [
+        "WhatsApp"
+      ],
+      "benefit": "répondre instantanément, qualifier les demandes et vendre sur WhatsApp",
+      "billing": "monthly",
+      "features": [
+        "Catalogue & commandes automatiques",
+        "Relances clients & paniers abandonnés",
+        "Paiement & CRM intégré",
+        "Support multilingue IA"
+      ],
+      "popular": true
     },
     {
       "id": "instagram_messenger",
       "name": "Bot Instagram / Messenger",
       "starting_price_eur": 100,
-      "price_label": "à partir de 100€",
-      "channels": ["Instagram", "Messenger"],
-      "benefit": "automatiser les conversations et transformer les messages en opportunités"
+      "price_label": "100€ /mois",
+      "channels": [
+        "Instagram",
+        "Messenger"
+      ],
+      "benefit": "automatiser les conversations et transformer les messages en opportunités",
+      "billing": "monthly",
+      "features": [
+        "Auto DM & réponses storys",
+        "Gestion commentaires & leads",
+        "Programmation de contenu IA",
+        "Insights audience & engagement"
+      ]
     },
     {
       "id": "omni",
       "name": "Pack Omni",
       "starting_price_eur": null,
       "price_label": "sur devis uniquement",
-      "channels": ["WhatsApp", "Telegram", "Instagram"],
+      "channels": [
+        "WhatsApp",
+        "Telegram",
+        "Instagram"
+      ],
       "benefit": "centraliser les conversations commerciales sur plusieurs canaux"
     }
   ],
   "qualification": {
-    "required_fields": ["name", "need", "budget", "timeline"],
+    "required_fields": [
+      "name",
+      "need",
+      "budget",
+      "timeline"
+    ],
     "field_labels": {
       "name": "nom ou activité",
       "need": "besoin à automatiser ou à vendre",
@@ -67,9 +109,30 @@
     ]
   },
   "conversation_rules": {
-    "short_positive": ["oui", "ok", "d'accord", "je t'écoute", "je te suis", "vas-y", "montre", "si", "yes"],
-    "short_negative": ["non", "non laisse", "laisse", "pas intéressé", "bof", "no"],
-    "unknown_answer": ["je sais pas", "je sais pas trop", "jsp"],
+    "short_positive": [
+      "oui",
+      "ok",
+      "d'accord",
+      "je t'écoute",
+      "je te suis",
+      "vas-y",
+      "montre",
+      "si",
+      "yes"
+    ],
+    "short_negative": [
+      "non",
+      "non laisse",
+      "laisse",
+      "pas intéressé",
+      "bof",
+      "no"
+    ],
+    "unknown_answer": [
+      "je sais pas",
+      "je sais pas trop",
+      "jsp"
+    ],
     "negative_reply": "Compris, je ne t'embête pas. Je te laisse juste un exemple ici au cas où, ça pourra t'aider plus tard.",
     "unknown_reply": "Pas de souci, on voit ça ensemble. C'est quoi qui te prend le plus de temps aujourd'hui dans ta gestion clients?",
     "allowed_next_steps": [
@@ -80,13 +143,81 @@
     "forbidden_next_step": "On te fait une démo 15 mn"
   },
   "scope": {
-    "handoff_topics": ["juridique", "médicale", "litige", "compta", "création de site complet", "sensible", "hors périmètre"],
+    "handoff_topics": [
+      "juridique",
+      "médicale",
+      "litige",
+      "compta",
+      "création de site complet",
+      "sensible",
+      "hors périmètre"
+    ],
     "handoff_reply": "Pour ce sujet, je préfère te passer mon responsable humain pour bien t'accompagner. Il te répond en moins de 2h.",
     "unknown_information_reply": "Je vérifie l'info exacte avec l'équipe et je te reviens."
   },
   "admin": {
     "description": "Les instructions, offres, FAQ et règles peuvent être mises à jour par un administrateur authentifié.",
     "admin_id_env": "AYA_ADMIN_ID",
-    "allowed_updates": ["instruction", "offer_price", "faq", "business_info"]
+    "allowed_updates": [
+      "instruction",
+      "offer_price",
+      "faq",
+      "business_info"
+    ]
+  },
+  "catalogue_v2": {
+    "headline": "KOMARA AGENCY - AUTOMATISE. VENDEZ. SCALER.",
+    "subheadline": "Solutions IA clés en main pour automatiser vos ventes et conversations client — déployé en 24h",
+    "proof_points": [
+      "+300% response speed",
+      "24/7 sales",
+      "no missed client"
+    ],
+    "offers": {
+      "telegram_bot": {
+        "id": "telegram",
+        "nom": "Telegram Bot",
+        "prix": "75€ /mois",
+        "price_label": "75€ /mois",
+        "features": [
+          "Réponses automatiques instantanées",
+          "FAQ & support client 24/7",
+          "Intégration simple Telegram API",
+          "Analytics & messages illimités"
+        ]
+      },
+      "whatsapp_bot": {
+        "id": "whatsapp",
+        "nom": "WhatsApp Bot",
+        "prix": "150€ /mois",
+        "price_label": "150€ /mois",
+        "populaire": true,
+        "features": [
+          "Catalogue & commandes automatiques",
+          "Relances clients & paniers abandonnés",
+          "Paiement & CRM intégré",
+          "Support multilingue IA"
+        ]
+      },
+      "instagram_bot": {
+        "id": "instagram_messenger",
+        "nom": "Instagram Bot",
+        "prix": "100€ /mois",
+        "price_label": "100€ /mois",
+        "features": [
+          "Auto DM & réponses storys",
+          "Gestion commentaires & leads",
+          "Programmation de contenu IA",
+          "Insights audience & engagement"
+        ]
+      }
+    },
+    "call_to_action": "Démarrer en 24h",
+    "terms": [
+      "Mise en place rapide",
+      "Support onboarding inclus",
+      "Annulation à tout moment"
+    ],
+    "contact": "@KomaraAgency | komara.agency"
   }
 }

@@ -61,7 +61,11 @@ def recommend_offer(need: str, channels: list[str] | None = None) -> dict[str, A
 
 def format_offer(offer_name: str, objective: str, price_eur: int | float | None = None) -> str:
     """Formate une recommandation avec prix connu ou mention explicite du devis."""
-    price = f"à partir de {price_eur:g}€" if price_eur is not None else "sur devis uniquement"
+    knowledge = _load()
+    known_offer = next((item for item in knowledge["offers"] if item["name"] == offer_name), None)
+    price = known_offer.get("price_label", "sur devis uniquement") if known_offer else (
+        f"à partir de {price_eur:g}€" if price_eur is not None else "sur devis uniquement"
+    )
     return (f"Pour ton objectif {objective.strip()}, le plus adapté c'est {offer_name}. "
             f"Le tarif est {price}. Prochaine étape : je te prépare une reco adaptée à ton objectif?")
 
@@ -84,6 +88,7 @@ def calculate_quote(offer_id: str, quantity: int = 1, addons: dict[str, float] |
     return {"status": "calculated", "currency": "EUR", "offer": offer["name"],
             "unit_price": offer["starting_price_eur"], "quantity": quantity,
             "addons": addon_values, "subtotal": subtotal, "total": total,
+            "billing": offer.get("billing", "one_time"), "price_label": offer.get("price_label", ""),
             "installation": knowledge["business"]["installation"],
             "payment_methods": knowledge["business"]["payment_methods"]}
 

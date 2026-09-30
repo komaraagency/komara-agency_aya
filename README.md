@@ -42,7 +42,9 @@ Dans le terminal :
 - `/qr chemin/vers/image.png` — décode le QR code localement ;
 - `/devis whatsapp` — calcule un devis à partir du prix enregistré ;
 - `/rdv 2026-10-01T14:00:00+01:00 Appel découverte` — crée un brouillon `.ics` importable dans un agenda.
-- `/catalog` — envoie le catalogue commercial au prospect.
+- `/catalog` — envoie le Catalogue V2 commercial au prospect.
+
+Les demandes courtes `catalogue`, `catalog`, `prix`, `tarifs`, `offres`, `montre` et `je veux voir` déclenchent également le Catalogue V2. Il présente les abonnements mensuels Telegram (75 €/mois), WhatsApp (150 €/mois, populaire) et Instagram (100 €/mois), avec leurs fonctionnalités.
 
 Le Pack Omni reste toujours `sur devis uniquement`. Aya ne fabrique pas de prix.
 

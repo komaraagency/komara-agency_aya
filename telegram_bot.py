@@ -53,21 +53,31 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 def catalog_text() -> str:
-    """Construit le catalogue à partir de knowledge.json, sans prix inventé."""
+    """Construit le Catalogue V2 depuis knowledge.json, sans prix inventé."""
     knowledge = load_knowledge()
-    lines = ["Catalogue Komara Agency — Aya", ""]
-    for offer in knowledge["offers"]:
-        price = offer["price_label"]
-        channels = ", ".join(offer["channels"])
-        lines.append(f"• {offer['name']} ({channels}) : {price}")
-        lines.append(f"  {offer['benefit']}")
+    catalogue = knowledge["catalogue_v2"]
+    lines = ["🚀 " + catalogue["headline"], catalogue["subheadline"], ""]
+    lines.extend("⚡ " + point for point in catalogue["proof_points"])
+    lines.append("")
+    for index, offer in enumerate(catalogue["offers"].values(), start=1):
+        popular = " [POPULAIRE]" if offer.get("populaire") else ""
+        lines.append(f"{index}. {offer['nom']} — {offer['prix']}{popular}")
+        lines.extend(f"   ✓ {feature}" for feature in offer["features"])
+        lines.append("")
     lines.extend([
-        "",
-        f"Installation : {knowledge['business']['installation']}",
-        "Paiement : " + ", ".join(knowledge["business"]["payment_methods"]),
-        "Écris-moi ton activité et ton objectif pour recevoir une recommandation adaptée.",
+        f"👉 {catalogue['call_to_action']}",
+        " • ".join(catalogue["terms"]),
+        catalogue["contact"],
     ])
     return "\n".join(lines)
+
+
+def is_catalogue_request(message: str) -> bool:
+    """Reconnaît les formulations courtes qui demandent le catalogue."""
+    normalized = " ".join(message.lower().strip().split())
+    return normalized in {
+        "catalogue", "catalog", "prix", "tarifs", "offres", "montre", "je veux voir"
+    }
 
 
 async def catalog_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -139,6 +149,9 @@ async def text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if await deliver_admin_reply(update, context):
         return
     incoming = update.message.text or ""
+    if is_catalogue_request(incoming):
+        await update.message.reply_text(catalog_text())
+        return
     response = answer(incoming, history, admin_id=admin_id)
     # Cette phrase est le repli local d'Aya lorsqu'elle ne possède pas la réponse.
     unknown = (
