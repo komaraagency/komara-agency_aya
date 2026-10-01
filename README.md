@@ -46,6 +46,20 @@ Dans le terminal :
 
 Les demandes courtes `catalogue`, `catalog`, `prix`, `tarifs`, `offres`, `montre` et `je veux voir` déclenchent également le Catalogue V2. Il présente les abonnements mensuels Telegram (75 €/mois), WhatsApp (150 €/mois, populaire) et Instagram (100 €/mois), avec leurs fonctionnalités.
 
+## Suivi commercial et intégrations externes
+
+Aya reste connectée à Telegram uniquement. Les prospects, événements, scores et relances sont persistés dans `AYA_DATA_DIR/aya.sqlite3` (configurer un volume Railway). Les relances sont envoyées après 24 h lorsqu'un prospect arrive au closing ou demande un transfert humain.
+
+Commandes Telegram supplémentaires :
+
+- `/stats` — analytics réservées à l'administrateur ;
+- `/rdv <date ISO> <titre>` — crée un événement Google Calendar si configuré ;
+- `/paiement stripe|paypal|orange_money <offer_id>` — génère une page de paiement hébergée par le prestataire.
+
+Google Sheets reçoit les prospects qualifiés si `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_SHEET_ID` et `GOOGLE_SHEET_RANGE` sont configurés. Google Calendar utilise les mêmes identifiants de compte de service et `GOOGLE_CALENDAR_ID`. Le tableur et l'agenda doivent être partagés avec l'adresse du compte de service.
+
+Les paiements ne transitent jamais par Aya : Stripe, PayPal ou Orange Money hébergent la page de paiement. Le statut réel d'un paiement doit être confirmé par un webhook vérifié avant de marquer une commande comme payée. Les paramètres et les clés sont détaillés dans `.env.example` et ne doivent jamais être commités.
+
 ## Parcours conversationnel d'Aya
 
 Le moteur `conversation_step()` dans [`actions.py`](actions.py) suit l'état de chaque prospect :

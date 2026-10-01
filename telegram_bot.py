@@ -9,10 +9,13 @@ from __future__ import annotations
 import logging
 import os
 import tempfile
+import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
 
 from actions import (
     admin_update,
+    calculate_quote,
     conversation_step,
     decode_qr,
     extract_pdf,
@@ -20,6 +23,9 @@ from actions import (
 )
 from knowledge_store import context_for, load_knowledge
 from rag_bot import answer
+from analytics import format_analytics
+from integrations import append_google_sheet, create_google_calendar_event, create_payment_link
+from storage import due_followups, init_db, mark_followup_sent, record_event, schedule_followup, upsert_lead
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
@@ -33,6 +39,7 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 HISTORY: dict[int, list[dict[str, str]]] = {}
 PENDING_ADMIN_REPLIES: dict[int, dict[str, str | int]] = {}
 CONVERSATION_STATES: dict[int, dict[str, object]] = {}
+FOLLOWUP_TASK: asyncio.Task[None] | None = None
 
 
 def env_first(*names: str) -> str:
@@ -121,6 +128,74 @@ async def catalog_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.message.reply_text(catalog_text())
 
 
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message:
+        return
+    if not admin_id_for(update):
+        await update.message.reply_text("Action admin refusée : identifiant non autorisé.")
+        return
+    await update.message.reply_text(format_analytics())
+
+
+async def payment_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message or not update.effective_chat:
+        return
+    parts = (update.message.text or "").split(maxsplit=2)
+    if len(parts) < 3:
+        await update.message.reply_text("Format : /paiement stripe|paypal|orange_money telegram|whatsapp|instagram_messenger")
+        return
+    provider, offer_id = parts[1], parts[2].strip()
+    try:
+        quote = calculate_quote(offer_id)
+        if quote.get("status") != "calculated":
+            await update.message.reply_text("Cette offre nécessite un devis préparé par l'équipe.")
+            return
+        result = await asyncio.to_thread(create_payment_link, provider, offer_id, float(quote["total"]), update.effective_chat.id, quote["offer"])
+        if result.get("status") != "created" or not result.get("url"):
+            await update.message.reply_text("Ce moyen de paiement n'est pas encore configuré. L'équipe peut finaliser la commande avec toi.")
+            return
+        record_event(update.effective_chat.id, "payment_link_created", {"provider": provider, "offer_id": offer_id, "reference": result.get("reference")})
+        await update.message.reply_text(f"Voici ton lien de paiement sécurisé ({provider}) :\n{result['url']}\n\nLa commande sera confirmée après validation du paiement.")
+    except (ValueError, RuntimeError, KeyError) as exc:
+        await update.message.reply_text(f"Paiement impossible : {exc}")
+
+
+async def calendar_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message:
+        return
+    parts = (update.message.text or "").split(maxsplit=2)
+    if len(parts) < 3:
+        await update.message.reply_text("Format : /rdv 2026-10-01T14:00:00+01:00 Titre du rendez-vous")
+        return
+    try:
+        result = await asyncio.to_thread(create_google_calendar_event, parts[2], parts[1])
+        if result.get("status") != "created":
+            await update.message.reply_text("Google Calendar n'est pas encore configuré. Je peux préparer un brouillon .ics.")
+            return
+        record_event(update.effective_chat.id if update.effective_chat else 0, "calendar_event_created", result)
+        await update.message.reply_text(f"Rendez-vous créé dans Google Calendar : {result.get('html_link', 'confirmation envoyée')}")
+    except (ValueError, RuntimeError) as exc:
+        await update.message.reply_text(f"Rendez-vous impossible : {exc}")
+
+
+async def followup_worker(application: Application) -> None:
+    while True:
+        try:
+            for item in due_followups():
+                await application.bot.send_message(chat_id=int(item["chat_id"]), text=item["message"])
+                mark_followup_sent(int(item["id"]))
+                record_event(int(item["chat_id"]), "followup_sent", {"followup_id": int(item["id"])})
+        except Exception:
+            LOGGER.exception("Follow-up worker failed")
+        await asyncio.sleep(60)
+
+
+async def post_init(application: Application) -> None:
+    global FOLLOWUP_TASK
+    init_db()
+    FOLLOWUP_TASK = asyncio.create_task(followup_worker(application))
+
+
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Commandes admin : instruction, faq, price et apprentissage question||réponse."""
     if not update.message:
@@ -189,8 +264,14 @@ async def text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text(catalog_text())
         return
     state = CONVERSATION_STATES.setdefault(chat_id, new_conversation_state())
+    previous_score = sum(bool(str(state.get(field, "")).strip()) for field in ("name", "need", "budget", "timeline")) * 25
     result = conversation_step(incoming, state)
     CONVERSATION_STATES[chat_id] = result["state"]
+    lead_state = result["state"]
+    score = sum(bool(str(lead_state.get(field, "")).strip()) for field in ("name", "need", "budget", "timeline")) * 25
+    status = "handoff" if result.get("handoff") else ("qualified" if score >= 75 else "active")
+    upsert_lead(chat_id, lead_state, score=score, status=status)
+    record_event(chat_id, "message", {"direction": "inbound", "stage": result.get("stage"), "score": score})
     response = result["reply"]
     await update.message.reply_text(response, reply_markup=action_buttons(result.get("buttons", [])))
     # Les sujets explicitement hors périmètre sont transmis à l'admin.
@@ -199,6 +280,19 @@ async def text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         forwarded = await context.bot.forward_message(chat_id=admin_chat_id, from_chat_id=chat_id, message_id=update.message.message_id)
         PENDING_ADMIN_REPLIES[forwarded.message_id] = {"client_chat_id": chat_id, "question": incoming}
         await context.bot.send_message(chat_id=admin_chat_id, text="Nouveau handoff commercial : réponds au message transféré pour reprendre la conversation.", reply_to_message_id=forwarded.message_id)
+        record_event(chat_id, "handoff", {"reason": incoming})
+        schedule_followup(chat_id, "Bonjour, je reviens vers toi concernant ton besoin. Souhaites-tu toujours avancer avec Komara Agency ?", 24)
+    if result.get("follow_up") or result.get("stage") == "closing":
+        schedule_followup(chat_id, "Je reviens vers toi pour savoir si tu souhaites démarrer l'automatisation de tes conversations.", 24)
+    if score >= 75 and previous_score < 75 and env_first("AYA_ADMIN_ID", "admin_id"):
+        admin_chat_id = int(env_first("AYA_ADMIN_ID", "admin_id"))
+        await context.bot.send_message(chat_id=admin_chat_id, text=f"Nouveau prospect qualifié (score {score}/100) : {lead_state.get('name', 'sans nom')} — {lead_state.get('need', 'besoin non précisé')}")
+        record_event(chat_id, "qualified_notification", {"score": score})
+    if score >= 75 and previous_score < 75:
+        try:
+            await asyncio.to_thread(append_google_sheet, [datetime.now(timezone.utc).isoformat(), chat_id, lead_state.get("name", ""), lead_state.get("need", ""), lead_state.get("budget", ""), lead_state.get("timeline", ""), score, lead_state.get("offer_id", ""), result.get("stage", ""), status])
+        except Exception:
+            LOGGER.exception("Google Sheets sync failed")
     history.extend([
         {"role": "user", "content": incoming},
         {"role": "assistant", "content": response},
@@ -253,9 +347,12 @@ async def photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 def build_application(token: str) -> Application:
-    application = Application.builder().token(token).build()
+    application = Application.builder().token(token).post_init(post_init).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("catalog", catalog_command))
+    application.add_handler(CommandHandler("stats", stats_command))
+    application.add_handler(CommandHandler("paiement", payment_command))
+    application.add_handler(CommandHandler("rdv", calendar_command))
     application.add_handler(CommandHandler("admin", admin_command))
     application.add_handler(CommandHandler("apprend", admin_command))
     application.add_handler(CallbackQueryHandler(conversation_button, pattern=r"^aya:"))
