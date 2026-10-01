@@ -25,7 +25,7 @@ from knowledge_store import context_for, load_knowledge
 from rag_bot import answer
 from analytics import format_analytics
 from integrations import append_google_sheet, create_google_calendar_event, create_payment_link
-from storage import due_followups, init_db, mark_followup_sent, record_event, schedule_followup, upsert_lead
+from storage import conversation_state, due_followups, init_db, mark_followup_sent, record_event, schedule_followup, upsert_lead
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
@@ -89,9 +89,30 @@ def catalog_text() -> str:
 def is_catalogue_request(message: str) -> bool:
     """Reconnaît les formulations courtes qui demandent le catalogue."""
     normalized = " ".join(message.lower().strip().split())
-    return normalized in {
+    return normalized.removeprefix("/") in {
         "catalogue", "catalog", "prix", "tarifs", "offres", "montre", "je veux voir"
     }
+
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.message:
+        await update.message.reply_text(
+            "Commandes Aya :\n/catalogue — voir les offres\n/stats — statistiques admin\n"
+            "/admin instruction <texte>\n/apprend <question> || <réponse>\n"
+            "/admin price <offre> <prix>\n/paiement <stripe|paypal|orange_money> <offre>\n"
+            "/rdv <date ISO> <titre>"
+        )
+
+
+async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.message and update.effective_chat:
+        CONVERSATION_STATES[update.effective_chat.id] = new_conversation_state()
+        await update.message.reply_text("Parfait, on repart de zéro. Quel est ton objectif commercial aujourd'hui ?")
+
+
+async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.message:
+        await update.message.reply_text("Commande inconnue. Essaie /help pour voir les commandes disponibles.")
 
 
 def action_buttons(buttons: list[str]) -> InlineKeyboardMarkup | None:
@@ -117,9 +138,13 @@ async def conversation_button(update: Update, context: ContextTypes.DEFAULT_TYPE
         state["stage"] = "objections"
         await query.message.reply_text(catalog_text(), reply_markup=action_buttons(["WhatsApp Bot", "Telegram Bot", "Instagram Bot", "J'ai une objection"]))
         return
-    state = CONVERSATION_STATES.setdefault(chat_id, new_conversation_state())
+    state = CONVERSATION_STATES.get(chat_id) or conversation_state(chat_id) or new_conversation_state()
+    CONVERSATION_STATES[chat_id] = state
     result = conversation_step(label, state)
     CONVERSATION_STATES[chat_id] = result["state"]
+    score = sum(bool(str(result["state"].get(field, "")).strip()) for field in ("name", "need", "budget", "timeline")) * 25
+    upsert_lead(chat_id, result["state"], score=score, status="qualified" if score >= 75 else "active")
+    record_event(chat_id, "button", {"label": label, "stage": result.get("stage"), "score": score})
     await query.message.reply_text(result["reply"], reply_markup=action_buttons(result.get("buttons", [])))
 
 
@@ -260,10 +285,14 @@ async def text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if await deliver_admin_reply(update, context):
         return
     incoming = update.message.text or ""
+    if incoming.startswith("/"):
+        await update.message.reply_text("Je n'ai pas reconnu cette commande. Essaie /help pour voir les commandes disponibles.")
+        return
     if is_catalogue_request(incoming):
         await update.message.reply_text(catalog_text())
         return
-    state = CONVERSATION_STATES.setdefault(chat_id, new_conversation_state())
+    state = CONVERSATION_STATES.get(chat_id) or conversation_state(chat_id) or new_conversation_state()
+    CONVERSATION_STATES[chat_id] = state
     previous_score = sum(bool(str(state.get(field, "")).strip()) for field in ("name", "need", "budget", "timeline")) * 25
     result = conversation_step(incoming, state)
     CONVERSATION_STATES[chat_id] = result["state"]
@@ -349,17 +378,19 @@ async def photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 def build_application(token: str) -> Application:
     application = Application.builder().token(token).post_init(post_init).build()
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("catalog", catalog_command))
+    application.add_handler(CommandHandler(["catalog", "catalogue"], catalog_command))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler(["reset", "restart"], reset_command))
     application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(CommandHandler("paiement", payment_command))
     application.add_handler(CommandHandler("rdv", calendar_command))
     application.add_handler(CommandHandler("admin", admin_command))
-    application.add_handler(CommandHandler("apprend", admin_command))
+    application.add_handler(CommandHandler(["apprend", "apprends"], admin_command))
     application.add_handler(CallbackQueryHandler(conversation_button, pattern=r"^aya:"))
     application.add_handler(MessageHandler(filters.Document.ALL, document_message))
     application.add_handler(MessageHandler(filters.PHOTO, photo_message))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_message))
-    application.add_handler(MessageHandler(filters.COMMAND, text_message))
+    application.add_handler(MessageHandler(filters.COMMAND, unknown_command))
     return application
 
 

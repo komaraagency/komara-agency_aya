@@ -55,6 +55,9 @@ Commandes Telegram supplémentaires :
 - `/stats` — analytics réservées à l'administrateur ;
 - `/rdv <date ISO> <titre>` — crée un événement Google Calendar si configuré ;
 - `/paiement stripe|paypal|orange_money <offer_id>` — génère une page de paiement hébergée par le prestataire.
+- `/help` — liste les commandes reconnues ; `/reset` — réinitialise le parcours du prospect.
+
+Les commandes `/catalogue` et `/catalog` sont équivalentes, tout comme `/apprend` et `/apprends`. Une commande inconnue n'est plus envoyée au moteur commercial : Aya demande d'utiliser `/help`. L'état complet du parcours, y compris la question en attente, est restauré depuis SQLite après un redémarrage.
 
 Google Sheets reçoit les prospects qualifiés si `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_SHEET_ID` et `GOOGLE_SHEET_RANGE` sont configurés. Google Calendar utilise les mêmes identifiants de compte de service et `GOOGLE_CALENDAR_ID`. Le tableur et l'agenda doivent être partagés avec l'adresse du compte de service.
 

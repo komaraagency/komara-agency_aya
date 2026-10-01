@@ -14,12 +14,14 @@ class AyaCoreTests(unittest.TestCase):
         os.environ.pop("AYA_DATA_DIR", None)
 
     def test_storage_and_analytics(self):
-        from storage import analytics, init_db, record_event, upsert_lead
+        from storage import analytics, conversation_state, init_db, record_event, upsert_lead
         init_db()
-        upsert_lead(10, {"name": "Test", "need": "vente", "budget": "100", "timeline": "demain", "stage": "closing"}, 100, "qualified")
+        state = {"name": "Test", "need": "vente", "budget": "100", "timeline": "demain", "stage": "qualification", "last_question": "pain"}
+        upsert_lead(10, state, 100, "qualified")
         record_event(10, "message")
         self.assertEqual(analytics()["qualified"], 1)
         self.assertEqual(analytics()["messages"], 1)
+        self.assertEqual(conversation_state(10)["last_question"], "pain")
 
     def test_payment_is_disabled_without_secret(self):
         from integrations import create_payment_link

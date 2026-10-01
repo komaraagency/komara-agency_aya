@@ -40,6 +40,7 @@ def init_db() -> None:
                 stage TEXT NOT NULL DEFAULT 'accroche',
                 score INTEGER NOT NULL DEFAULT 0,
                 status TEXT NOT NULL DEFAULT 'new',
+                state_json TEXT NOT NULL DEFAULT '{}',
                 last_message_at TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
@@ -62,6 +63,9 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_followups_due ON followups(status, due_at);
             """
         )
+        columns = {row[1] for row in db.execute("PRAGMA table_info(leads)")}
+        if "state_json" not in columns:
+            db.execute("ALTER TABLE leads ADD COLUMN state_json TEXT NOT NULL DEFAULT '{}'")
 
 
 def upsert_lead(chat_id: int, state: dict[str, Any], score: int = 0, status: str = "active") -> None:
@@ -69,12 +73,12 @@ def upsert_lead(chat_id: int, state: dict[str, Any], score: int = 0, status: str
     fields = {key: str(state.get(key, "")) for key in ("name", "need", "budget", "timeline", "pain", "offer_id", "stage")}
     with _connect() as db:
         db.execute(
-            """INSERT INTO leads(chat_id,name,need,budget,timeline,pain,offer_id,stage,score,status,last_message_at,created_at,updated_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """INSERT INTO leads(chat_id,name,need,budget,timeline,pain,offer_id,stage,score,status,state_json,last_message_at,created_at,updated_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(chat_id) DO UPDATE SET name=excluded.name,need=excluded.need,budget=excluded.budget,
                timeline=excluded.timeline,pain=excluded.pain,offer_id=excluded.offer_id,stage=excluded.stage,
-               score=excluded.score,status=excluded.status,last_message_at=excluded.last_message_at,updated_at=excluded.updated_at""",
-            (chat_id, fields["name"], fields["need"], fields["budget"], fields["timeline"], fields["pain"], fields["offer_id"], fields["stage"], score, status, now, now, now),
+               score=excluded.score,status=excluded.status,state_json=excluded.state_json,last_message_at=excluded.last_message_at,updated_at=excluded.updated_at""",
+            (chat_id, fields["name"], fields["need"], fields["budget"], fields["timeline"], fields["pain"], fields["offer_id"], fields["stage"], score, status, json.dumps(state, ensure_ascii=False), now, now, now),
         )
 
 
@@ -103,6 +107,18 @@ def mark_followup_sent(followup_id: int) -> None:
 def lead(chat_id: int) -> sqlite3.Row | None:
     with _connect() as db:
         return db.execute("SELECT * FROM leads WHERE chat_id=?", (chat_id,)).fetchone()
+
+
+def conversation_state(chat_id: int) -> dict[str, Any] | None:
+    """Reconstruit l'état métier d'un prospect après un redémarrage."""
+    row = lead(chat_id)
+    if row is None:
+        return None
+    try:
+        saved = json.loads(row["state_json"] or "{}")
+    except (TypeError, json.JSONDecodeError):
+        saved = {}
+    return {**{key: row[key] for key in ("stage", "name", "need", "budget", "timeline", "pain", "offer_id")}, **saved}
 
 
 def analytics() -> dict[str, Any]:
