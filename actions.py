@@ -156,7 +156,7 @@ def handoff_to_human(reason: str) -> dict[str, str]:
 
 CONVERSATION_STAGES = (
     "accroche", "qualification", "douleur_solution", "catalogue",
-    "objections", "closing", "handoff_suivi",
+    "objections", "closing", "handoff_suivi", "suivi_confirme",
 )
 
 
@@ -277,6 +277,21 @@ def conversation_step(message: str, state: dict[str, Any] | None = None) -> dict
             state["stage"] = "handoff_suivi"
             return {"stage": state["stage"], "reply": "Super. Je prépare le suivi avec ton activité, ton besoin et ton délai. Tu confirmes qu'on avance ici?", "buttons": ["Confirmer", "Parler à un humain"], "state": state, "follow_up": True}
         return {"stage": stage, "reply": "Tu veux que je prépare le démarrage ou tu as une dernière question?", "buttons": ["Oui, démarrer", "J'ai une question"], "state": state}
+
+    if stage == "handoff_suivi":
+        if "humain" in lower or "responsable" in lower:
+            state["stage"] = "handoff_suivi"
+            return {"stage": state["stage"], "reply": "D'accord. Je transmets maintenant ton récapitulatif à l'équipe. Tu recevras une réponse humaine ici, sans autre question automatique.", "buttons": [], "state": state, "handoff": True, **frame_data}
+        if any(word in lower for word in ("confirmer", "confirm", "oui", "avancer", "continuer")):
+            state["stage"] = "suivi_confirme"
+            return {"stage": state["stage"], "reply": "C'est confirmé. L'équipe reçoit ton activité, ton besoin et ton délai. Prochaine étape : elle te contacte ici pour finaliser le démarrage.", "buttons": [], "state": state, "follow_up": True, **frame_data}
+        if _short_negative(text):
+            state["stage"] = "suivi_confirme"
+            return {"stage": state["stage"], "reply": "Compris, je mets le suivi en pause. Tu pourras revenir ici quand tu voudras.", "buttons": [], "state": state, **frame_data}
+        return {"stage": stage, "reply": "Le suivi est déjà préparé. Choisis simplement une option : confirmer le démarrage ou parler à un humain.", "buttons": ["Confirmer", "Parler à un humain"], "state": state, **frame_data}
+
+    if stage == "suivi_confirme":
+        return {"stage": stage, "reply": "Ton suivi est déjà confirmé. L'équipe revient vers toi ici ; je ne vais pas te faire répéter les mêmes informations.", "buttons": [], "state": state, **frame_data}
 
     return {"stage": "handoff_suivi", "reply": "Je peux organiser le suivi avec l'équipe. Tu préfères continuer ici ou parler à un humain?", "buttons": ["Continuer ici", "Parler à un humain"], "state": state}
 

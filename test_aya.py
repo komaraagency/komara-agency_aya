@@ -52,6 +52,19 @@ class AyaCoreTests(unittest.TestCase):
         self.assertEqual(result["state"]["timeline"], "je vends des vêtements sur whatsapp, budget 150 euros demain")
         self.assertIn("understanding", result)
 
+    def test_handoff_flow_does_not_loop(self):
+        from actions import conversation_step
+        state = {"stage": "handoff_suivi", "name": "Client", "need": "vente", "budget": "150 euros", "timeline": "demain"}
+        confirmed = conversation_step("Confirmer", state)
+        self.assertEqual(confirmed["stage"], "suivi_confirme")
+        self.assertEqual(confirmed["buttons"], [])
+        finished = conversation_step("bonjour", confirmed["state"])
+        self.assertEqual(finished["stage"], "suivi_confirme")
+        self.assertIn("déjà confirmé", finished["reply"])
+        human = conversation_step("Parler à un humain", state)
+        self.assertTrue(human.get("handoff"))
+        self.assertEqual(human["buttons"], [])
+
 
 if __name__ == "__main__":
     unittest.main()
