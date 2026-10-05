@@ -14,6 +14,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from understanding import understand
+
 
 KNOWLEDGE_PATH = Path(__file__).with_name("knowledge.json")
 
@@ -200,16 +202,18 @@ def conversation_step(message: str, state: dict[str, Any] | None = None) -> dict
     indépendante de Telegram et peut être utilisée par WhatsApp, une API ou des tests.
     """
     state = {**new_conversation_state(), **(state or {})}
-    text = message.strip()
-    lower = text.lower()
+    frame = understand(message, state=state)
+    text = frame.normalized
+    lower = frame.normalized
+    frame_data = {"understanding": frame.to_dict()}
     if not text:
-        return {"stage": state["stage"], "reply": "Que souhaites-tu automatiser aujourd'hui?", "buttons": [], "state": state}
-    if any(topic in lower for topic in ("juridique", "médical", "médecin", "litige", "compta", "comptabilité", "site complet")):
+        return {"stage": state["stage"], "reply": "Que souhaites-tu automatiser aujourd'hui?", "buttons": [], "state": state, **frame_data}
+    if "human_handoff_required" in frame.policy_flags:
         state["stage"] = "handoff_suivi"
-        return {"stage": state["stage"], "reply": "Pour ce sujet, je préfère te passer mon responsable humain pour bien t'accompagner. Il te répond en moins de 2h.", "buttons": [], "state": state, "handoff": True}
+        return {"stage": state["stage"], "reply": "Pour ce sujet, je préfère te passer mon responsable humain pour bien t'accompagner. Il te répond en moins de 2h.", "buttons": [], "state": state, "handoff": True, **frame_data}
     if _short_negative(text):
         state["stage"] = "handoff_suivi"
-        return {"stage": state["stage"], "reply": "Compris, je ne t'embête pas. Je te laisse juste un exemple ici au cas où, ça pourra t'aider plus tard.", "buttons": ["catalogue"], "state": state}
+        return {"stage": state["stage"], "reply": "Compris, je ne t'embête pas. Je te laisse juste un exemple ici au cas où, ça pourra t'aider plus tard.", "buttons": ["catalogue"], "state": state, **frame_data}
 
     stage = state.get("stage", "accroche")
     if stage == "accroche":
@@ -220,6 +224,12 @@ def conversation_step(message: str, state: dict[str, Any] | None = None) -> dict
     if stage == "qualification":
         field = state.get("last_question", "name")
         state[field] = text
+        if frame.entities.get("budget"):
+            state["budget"] = frame.entities["budget"]
+        if frame.entities.get("timeline"):
+            state["timeline"] = frame.entities["timeline"]
+        if frame.entities.get("channel") and not state.get("need"):
+            state["need"] = f"automatisation {frame.entities['channel']}"
         lead = qualify_lead(state["name"], state["need"], state["budget"], state["timeline"])
         next_field = lead["missing_fields"][0] if lead["missing_fields"] else None
         questions = {
@@ -229,10 +239,10 @@ def conversation_step(message: str, state: dict[str, Any] | None = None) -> dict
         }
         if next_field:
             state["last_question"] = next_field
-            return {"stage": state["stage"], "reply": questions[next_field], "buttons": [], "state": state, "lead": lead}
+            return {"stage": state["stage"], "reply": questions[next_field], "buttons": [], "state": state, "lead": lead, **frame_data}
         state["stage"] = "douleur_solution"
         state["last_question"] = "pain"
-        return {"stage": state["stage"], "reply": "Qu'est-ce qui te prend le plus de temps aujourd'hui dans ta gestion clients?", "buttons": [], "state": state, "lead": lead}
+        return {"stage": state["stage"], "reply": "Qu'est-ce qui te prend le plus de temps aujourd'hui dans ta gestion clients?", "buttons": [], "state": state, "lead": lead, **frame_data}
 
     if stage == "douleur_solution":
         state["pain"] = text

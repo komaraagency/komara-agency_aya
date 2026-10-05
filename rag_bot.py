@@ -24,6 +24,7 @@ from actions import (
     recommend_offer,
 )
 from knowledge_store import context_for, load_knowledge
+from understanding import understand
 
 SYSTEM_PROMPT = """Tu es AYA, agente commerciale de Komara Agency. Tu es une femme de 26 ans,
 chaleureuse, professionnelle, directe, et tu ne dis jamais que tu es une IA.
@@ -40,6 +41,8 @@ Mémoire pertinente :
 {context}
 
 État de qualification : {lead_state}
+
+Analyse structurée du message : {understanding}
 """
 
 
@@ -73,8 +76,9 @@ def _state_from_history(history: list[dict[str, str]] | None) -> dict[str, str]:
 def _deterministic_reply(message: str, history: list[dict[str, str]] | None) -> str | None:
     """Gère les règles critiques avant d'appeler un modèle éventuel."""
     knowledge = load_knowledge()
-    lowered = message.lower().strip()
-    if _contains(lowered, knowledge["scope"]["handoff_topics"]):
+    frame = understand(message, history)
+    lowered = frame.normalized
+    if "human_handoff_required" in frame.policy_flags:
         handoff_to_human(reason=message)
         return knowledge["scope"]["handoff_reply"]
     if lowered in knowledge["conversation_rules"]["short_negative"] or _contains(lowered, ["pas intéressé", "laisse tomber"]):
@@ -118,12 +122,13 @@ def answer(message: str, history: list[dict[str, str]] | None = None, admin_id: 
     deterministic = _deterministic_reply(message, history)
     if deterministic is not None:
         return deterministic
-    context = context_for(message)
+    frame = understand(message, history)
+    context = frame.knowledge_context
     ollama_host = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
     ollama_model = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
     try:
         state = qualify_lead(**_state_from_history(history))
-        messages: list[dict[str, str]] = [{"role": "system", "content": SYSTEM_PROMPT.format(context=context, lead_state=state)}]
+        messages: list[dict[str, str]] = [{"role": "system", "content": SYSTEM_PROMPT.format(context=context, lead_state=state, understanding=frame.to_dict())}]
         messages.extend(history or [])
         messages.append({"role": "user", "content": message})
         request = Request(f"{ollama_host}/api/chat", data=json.dumps({"model": ollama_model, "messages": messages, "stream": False, "options": {"temperature": 0.35}}).encode(), headers={"Content-Type": "application/json"})

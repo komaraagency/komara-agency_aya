@@ -50,6 +50,19 @@ Les demandes courtes `catalogue`, `catalog`, `prix`, `tarifs`, `offres`, `montre
 
 Aya reste connectée à Telegram uniquement. Les prospects, événements, scores et relances sont persistés dans `AYA_DATA_DIR/aya.sqlite3` (configurer un volume Railway). Les relances sont envoyées après 24 h lorsqu'un prospect arrive au closing ou demande un transfert humain.
 
+## Nouvelle architecture de compréhension
+
+Le moteur suit maintenant un trajet explicite inspiré du schéma `L'information IA` :
+
+1. **Données** — message brut, historique et état du prospect ;
+2. **Tokens** — normalisation et découpage lexical ;
+3. **Nombres** — caractéristiques numériques déterministes : longueur, question, nombres, mots-clés et empreinte stable ;
+4. **Transformeur / attention contextuelle** — sélection des derniers passages pertinents par récence et recouvrement lexical ;
+5. **Pré-entraînement** — contexte récupéré depuis `knowledge.json` ;
+6. **Post-entraînement** — règles commerciales et de sécurité : qualification, refus de prix inventé, arrêt après refus et transfert humain.
+
+Cette architecture est implémentée dans `understanding.py`. Elle ne prétend pas entraîner un modèle de langage dans Railway : elle rend les étapes de compréhension observables et reproductibles, puis peut transmettre le cadre structuré à Ollama lorsque celui-ci est activé.
+
 Commandes Telegram supplémentaires :
 
 - `/stats` — analytics réservées à l'administrateur ;

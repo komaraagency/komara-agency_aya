@@ -34,6 +34,24 @@ class AyaCoreTests(unittest.TestCase):
         self.assertEqual(append_google_sheet(["x"])["status"], "disabled")
         self.assertEqual(create_google_calendar_event("x", "2026-10-01T14:00:00+01:00")["status"], "disabled")
 
+    def test_understanding_pipeline_has_six_layers(self):
+        from understanding import understand
+        frame = understand("Je veux un bot WhatsApp, budget 150 euros, urgent")
+        self.assertEqual(frame.entities["channel"], "whatsapp")
+        self.assertEqual(frame.entities["budget"], "150 euros")
+        self.assertEqual(frame.intent, "pricing")
+        self.assertIn("keyword_whatsapp", frame.numeric_features)
+        self.assertGreaterEqual(frame.confidence, 0.35)
+
+    def test_conversation_uses_understanding_entities(self):
+        from actions import conversation_step, new_conversation_state
+        state = new_conversation_state()
+        state = conversation_step("bonjour", state)["state"]
+        result = conversation_step("Je vends des vêtements sur WhatsApp, budget 150 euros demain", state)
+        self.assertEqual(result["state"]["budget"], "150 euros")
+        self.assertEqual(result["state"]["timeline"], "je vends des vêtements sur whatsapp, budget 150 euros demain")
+        self.assertIn("understanding", result)
+
 
 if __name__ == "__main__":
     unittest.main()
